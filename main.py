@@ -8,7 +8,7 @@ from flask import Flask, render_template, redirect, jsonify
 from flask_wtf import FlaskForm
 from flask_bootstrap import Bootstrap
 from wtforms import StringField, IntegerField, SelectField
-from wtforms.validators import InputRequired
+from wtforms.validators import InputRequired, IPAddress
 
 
 app = Flask(__name__)
@@ -20,11 +20,12 @@ conn = libvirt.open("")
 names = conn.listAllDomains()
 
 
-def createDomain(name,memoria,cpu):
+def createDomain(name,memoria,cpu,ip):
 
     UUID = str(uuid.uuid4())
     new_dom_xml = open('domain.xml')
     xml = new_dom_xml.read()
+    mac = str(generateUniqueMac())
     for domain in names:
         if domain.info()[0] == 1:
             domain.destroy()
@@ -33,7 +34,9 @@ def createDomain(name,memoria,cpu):
     xml = xml.replace('#{MEMORIA}', str(memoria))
     xml = xml.replace('#{CPU}', str(cpu))
     xml = xml.replace('#{DISK}', cloneDisk(name))
-    xml = xml.replace('#{MAC}', str(generateUniqueMac()))
+    xml = xml.replace('#{MAC}', mac)
+
+    setIP(mac, ip)
 
     print(xml)
 
@@ -44,6 +47,10 @@ def createDomain(name,memoria,cpu):
 
 
 
+def setIP(mac, ip):
+    template_ip = f'<host mac="{mac}" ip="{ip}"/>'
+    network = conn.networkLookupByName("default")
+    result = network.update(libvirt.VIR_NETWORK_UPDATE_COMMAND_ADD_FIRST, libvirt.VIR_NETWORK_SECTION_IP_DHCP_HOST, -1, template_ip)
 
 def cloneDisk(name):
     diskname = name+'.qcow2'
@@ -92,7 +99,7 @@ class VirtForm(FlaskForm):
     memory = IntegerField('Memory:', validators=[InputRequired()])
     cpu = IntegerField("CPU:", validators=[InputRequired()])
     unity = SelectField("Unity:",choices=[('KB', 'KB'), ('MB', 'MB'), ('GB', 'GB')], validators=[InputRequired()])
-
+    ip = StringField('IPv4:', validators=[InputRequired(), IPAddress(ipv4=True, ipv6=False)])
 
 @app.route('/form', methods=['GET', 'POST'])
 def form():
@@ -102,17 +109,18 @@ def form():
         memoria = int(form.memory.data)
         base = form.unity.data
         cpu = int(form.cpu.data)
-        print(memoria)
-        print(base)
+        ip = form.ip.data
+
         memoria = getMemoryNumber(memoria, base)
-        print(memoria)
-        createDomain(nome, memoria, cpu)
+
+        createDomain(nome, memoria, cpu,ip)
 
         jsonResultado = {}
 
         jsonResultado['name'] = nome
         jsonResultado['memoria'] = memoria
         jsonResultado['cpu'] = cpu
+        jsonResultado['ip'] = ip
 
         return jsonify(jsonResultado)
 
